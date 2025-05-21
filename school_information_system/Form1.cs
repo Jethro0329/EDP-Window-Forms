@@ -4,10 +4,14 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Xml.Linq;
+using Excel = Microsoft.Office.Interop.Excel;
+
 
 namespace school_information_system
 {
@@ -20,6 +24,44 @@ namespace school_information_system
         {
             InitializeComponent();
         }
+
+        private void ExportFilteredReportToExcel()
+        {
+            DataTable dt = LoadFilteredReportData();
+            if (dt == null || dt.Rows.Count == 0)
+            {
+                MessageBox.Show("No data to export.");
+                return;
+            }
+
+            // Excel export same as before
+            Excel.Application excelApp = new Excel.Application();
+            Excel.Workbook workbook = excelApp.Workbooks.Add(Type.Missing);
+            Excel.Worksheet worksheet = workbook.Sheets[1];
+            worksheet.Name = "Filtered Report";
+
+            // Headers
+            for (int i = 0; i < dt.Columns.Count; i++)
+            {
+                worksheet.Cells[1, i + 1] = dt.Columns[i].ColumnName;
+            }
+
+            // Data
+            for (int i = 0; i < dt.Rows.Count; i++)
+            {
+                for (int j = 0; j < dt.Columns.Count; j++)
+                {
+                    worksheet.Cells[i + 2, j + 1] = dt.Rows[i][j]?.ToString();
+                }
+            }
+
+            worksheet.UsedRange.Columns.AutoFit();
+            worksheet.UsedRange.AutoFilter(1);
+            excelApp.Visible = true;
+        }
+
+
+
 
         private void txtName_TextChanged(object sender, EventArgs e)
         {
@@ -463,8 +505,8 @@ namespace school_information_system
             if (result == DialogResult.No) return;
 
             int teacherId = Convert.ToInt32(dgvTeachers.CurrentRow.Cells["teacher_id"].Value);
-            string connStr = "server=localhost;database=school_information_system;uid=root;pwd=jeth123;";
-            using (MySqlConnection conn = new MySqlConnection(connStr))
+            
+            using (MySqlConnection conn = new MySqlConnection(connectionString))
             {
                 conn.Open();
                 string query = "DELETE FROM teachers WHERE teacher_id=@id";
@@ -716,5 +758,649 @@ namespace school_information_system
                 txtGrade.Text = row.Cells["grade"].Value.ToString();
             }
         }
+
+        private void label21_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void LoadUsers()
+        {
+            using (MySqlConnection conn = new MySqlConnection(connectionString))
+            {
+                string query = "SELECT user_id, username, email, role FROM users";
+                MySqlDataAdapter da = new MySqlDataAdapter(query, conn);
+                DataTable dt = new DataTable();
+                da.Fill(dt);
+                dgvUsers.DataSource = dt;
+            }
+        }
+
+        private void btnAddUser_Click(object sender, EventArgs e)
+        {
+            using (MySqlConnection conn = new MySqlConnection(connectionString))
+            {
+                try
+                {
+                    conn.Open();
+                    string query = "INSERT INTO users (username, email, password, role) VALUES (@Name, @Email, SHA2(@Password, 256), @Role)";
+                    MySqlCommand cmd = new MySqlCommand(query, conn);
+                    cmd.Parameters.AddWithValue("@Name", txtUserName.Text);
+                    cmd.Parameters.AddWithValue("@Email", txtUserEmail.Text);
+                    cmd.Parameters.AddWithValue("@Password", txtUserPassword.Text);
+                    cmd.Parameters.AddWithValue("@Role", cbUserRole.Text);
+                    cmd.ExecuteNonQuery();
+                    MessageBox.Show("User added successfully.");
+                    LoadUsers();
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Error: " + ex.Message);
+                }
+            }
+        }
+
+        private void dgvUsers_CellContentClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex >= 0)
+            {
+                txtUserName.Text = dgvUsers.Rows[e.RowIndex].Cells["name"].Value.ToString();
+                txtUserEmail.Text = dgvUsers.Rows[e.RowIndex].Cells["email"].Value.ToString();
+                cbUserRole.Text = dgvUsers.Rows[e.RowIndex].Cells["role"].Value.ToString();
+                txtUserPassword.Text = ""; // password hidden for security
+            }
+        }
+
+        private void txtUserEmail_TextChanged(object sender, EventArgs e)
+        {
+
+        }
+
+        private void btnUpdateUser_Click(object sender, EventArgs e)
+        {
+            if (dgvUsers.CurrentRow == null) return;
+
+            int userId = Convert.ToInt32(dgvUsers.CurrentRow.Cells["user_id"].Value);
+
+            using (MySqlConnection conn = new MySqlConnection(connectionString))
+            {
+                conn.Open();
+                string query = "UPDATE users SET username=@Name, email=@Email, role=@Role" +
+                               (string.IsNullOrWhiteSpace(txtUserPassword.Text) ? "" : ", password=SHA2(@Password, 256)") +
+                               " WHERE user_id=@UserId";
+                MySqlCommand cmd = new MySqlCommand(query, conn);
+                cmd.Parameters.AddWithValue("@Name", txtUserName.Text);
+                cmd.Parameters.AddWithValue("@Email", txtUserEmail.Text);
+                cmd.Parameters.AddWithValue("@Role", cbUserRole.Text);
+                cmd.Parameters.AddWithValue("@UserId", userId);
+                if (!string.IsNullOrWhiteSpace(txtUserPassword.Text))
+                    cmd.Parameters.AddWithValue("@Password", txtUserPassword.Text);
+                cmd.ExecuteNonQuery();
+                MessageBox.Show("User updated.");
+                LoadUsers();
+            }
+        }
+
+        private void btnDeleteUser_Click(object sender, EventArgs e)
+        {
+            if (dgvUsers.CurrentRow == null) return;
+            int userId = Convert.ToInt32(dgvUsers.CurrentRow.Cells["user_id"].Value);
+
+            var confirm = MessageBox.Show("Are you sure to delete this user?", "Confirm", MessageBoxButtons.YesNo);
+            if (confirm == DialogResult.Yes)
+            {
+                using (MySqlConnection conn = new MySqlConnection(connectionString))
+                {
+                    conn.Open();
+                    string query = "DELETE FROM users WHERE user_id=@UserId";
+                    MySqlCommand cmd = new MySqlCommand(query, conn);
+                    cmd.Parameters.AddWithValue("@UserId", userId);
+                    cmd.ExecuteNonQuery();
+                    MessageBox.Show("User deleted.");
+                    LoadUsers();
+                }
+            }
+        }
+
+        private void btnClearUser_Click(object sender, EventArgs e)
+        {
+            txtUserName.Clear();
+            txtUserEmail.Clear();
+            txtUserPassword.Clear();
+            cbUserRole.SelectedIndex = -1;
+        }
+
+        private void btnLoadUsers_Click(object sender, EventArgs e)
+        {
+            LoadUsers();
+        }
+
+        private void label22_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void tabPage5_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void btnGetAvgGrade_Click(object sender, EventArgs e)
+        {
+            
+        }
+
+        private void GetAverageGrade(int studentId)
+        {
+            
+        }
+
+
+        private void label23_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void tabPage1_Click_1(object sender, EventArgs e)
+        {
+
+        }
+
+        private void label3_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void label4_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void label5_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void txtClassID_TextChanged(object sender, EventArgs e)
+        {
+
+        }
+
+        private void label2_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void dtpGraduationDate_ValueChanged(object sender, EventArgs e)
+        {
+
+        }
+
+        private void label6_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void tabControl1_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (tabControl1.SelectedTab == tabReports)
+            {
+                LoadStudentsCombo();
+                LoadClassesCombo();
+            }
+        }
+
+        private void label14_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void label13_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void label7_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void tabPage4_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void label12_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void label11_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void txtTSubject_TextChanged(object sender, EventArgs e)
+        {
+
+        }
+
+        private void txtTLastName_TextChanged(object sender, EventArgs e)
+        {
+
+        }
+
+        private void label10_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void txtTFirstName_TextChanged(object sender, EventArgs e)
+        {
+
+        }
+
+        private void label9_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void label20_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void txtGrade_TextChanged(object sender, EventArgs e)
+        {
+
+        }
+
+        private void label19_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void cbSubject_SelectedIndexChanged(object sender, EventArgs e)
+        {
+
+        }
+
+        private void label18_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void label17_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void label16_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void txtSubjectName_TextChanged(object sender, EventArgs e)
+        {
+
+        }
+
+        private void tabPage6_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void cbUserRole_SelectedIndexChanged(object sender, EventArgs e)
+        {
+
+        }
+
+        private void txtUserPassword_TextChanged(object sender, EventArgs e)
+        {
+
+        }
+
+        private void txtUserName_TextChanged(object sender, EventArgs e)
+        {
+
+        }
+
+        private void lblUserRole_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void lblUserPassword_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void lblUserEmail_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void lblUserName_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void cbStudents_SelectedIndexChanged(object sender, EventArgs e)
+        {
+           
+        }
+
+        private void LoadStudentsCombo()
+        {
+            using (MySqlConnection conn = new MySqlConnection(connectionString))
+            {
+                try
+                {
+                    conn.Open();
+                    string query = "SELECT student_id, CONCAT(first_name, ' ', last_name) AS student_name FROM students";
+                    MySqlCommand cmd = new MySqlCommand(query, conn);
+                    MySqlDataAdapter adapter = new MySqlDataAdapter(cmd);
+                    DataTable dt = new DataTable();
+                    adapter.Fill(dt);
+
+                    cmbStudents.DataSource = dt;
+                    cmbStudents.DisplayMember = "student_name";
+                    cmbStudents.ValueMember = "student_id";
+                    cmbStudents.SelectedIndex = -1;
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Error loading students: " + ex.Message);
+                }
+            }
+        }
+
+
+        private void cbClasses_SelectedIndexChanged(object sender, EventArgs e)
+        {
+           
+        }
+
+        private void btnCountStudents_Click(object sender, EventArgs e)
+        {
+            
+        }
+
+        private void CountStudentsInClass(int classId)
+        {
+            
+        }
+
+
+        private void btnGetHighestGrade_Click(object sender, EventArgs e)
+        {
+            
+        }
+
+        private void GetHighestGradeInClass(int classId)
+        {
+            
+        }
+
+
+        private void lblStudentCount_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void lblHighestGrade_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void cmbClasses_SelectedIndexChanged(object sender, EventArgs e)
+        {
+
+        }
+
+        private void LoadClassesCombo()
+        {
+            using (MySqlConnection conn = new MySqlConnection(connectionString))
+            {
+                try
+                {
+                    conn.Open();
+                    string query = "SELECT class_id, class_name FROM classes";
+                    MySqlCommand cmd = new MySqlCommand(query, conn);
+                    MySqlDataAdapter adapter = new MySqlDataAdapter(cmd);
+                    DataTable dt = new DataTable();
+                    adapter.Fill(dt);
+
+                    cmbClasses.DataSource = dt;
+                    cmbClasses.DisplayMember = "class_name";
+                    cmbClasses.ValueMember = "class_id";
+                    cmbClasses.SelectedIndex = -1;
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Error loading classes: " + ex.Message);
+                }
+            }
+        }
+
+        private void btnGetAverage_Click(object sender, EventArgs e)
+        {
+            if (cmbStudents.SelectedIndex == -1)
+            {
+                MessageBox.Show("Please select a student first.");
+                return;
+            }
+
+            int studentId = Convert.ToInt32(cmbStudents.SelectedValue);
+
+            using (MySqlConnection conn = new MySqlConnection(connectionString))
+            {
+                try
+                {
+                    conn.Open();
+                    string query = "SELECT AVG(grade) AS avg_grade FROM grades WHERE student_id = @studentId";
+                    MySqlCommand cmd = new MySqlCommand(query, conn);
+                    cmd.Parameters.AddWithValue("@studentId", studentId);
+
+                    object result = cmd.ExecuteScalar();
+
+                    if (result != DBNull.Value)
+                    {
+                        double avgGrade = Convert.ToDouble(result);
+                        lblAverageGrade.Text = $"Average Grade: {avgGrade:F2}";
+                    }
+                    else
+                    {
+                        lblAverageGrade.Text = "Average Grade: N/A";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Error calculating average: " + ex.Message);
+                }
+            }
+        }
+
+        private void lblHighestResult_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void btnGetHighest_Click(object sender, EventArgs e)
+        {
+            
+        }
+
+        private void btnExportToExcel_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                DataTable reportData = LoadAllStudentReports(); // ✅ get all data
+
+                using (SaveFileDialog sfd = new SaveFileDialog() { Filter = "CSV File|*.csv" })
+                {
+                    if (sfd.ShowDialog() == DialogResult.OK)
+                    {
+                        using (StreamWriter sw = new StreamWriter(sfd.FileName))
+                        {
+                            // Write headers
+                            for (int i = 0; i < reportData.Columns.Count; i++)
+                            {
+                                sw.Write(reportData.Columns[i]);
+                                if (i < reportData.Columns.Count - 1)
+                                    sw.Write(",");
+                            }
+                            sw.WriteLine();
+
+                            // Write data rows
+                            foreach (DataRow row in reportData.Rows)
+                            {
+                                for (int i = 0; i < reportData.Columns.Count; i++)
+                                {
+                                    // Escape commas and quotes in data
+                                    var data = row[i].ToString();
+                                    if (data.Contains(",") || data.Contains("\""))
+                                        data = $"\"{data.Replace("\"", "\"\"")}\"";
+
+                                    sw.Write(data);
+                                    if (i < reportData.Columns.Count - 1)
+                                        sw.Write(",");
+                                }
+                                sw.WriteLine();
+                            }
+                        }
+
+                        MessageBox.Show("Report exported successfully as CSV!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Error exporting report: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+
+
+        private void LoadClassFilter()
+        {
+            using (MySqlConnection conn = new MySqlConnection(connectionString))
+            {
+                try
+                {
+                    conn.Open();
+                    MySqlCommand cmd = new MySqlCommand("SELECT class_id, class_name FROM classes", conn);
+                    MySqlDataAdapter da = new MySqlDataAdapter(cmd);
+                    DataTable dt = new DataTable();
+                    da.Fill(dt);
+
+                    //cmbFilterClass.DataSource = dt;
+                    //cmbFilterClass.DisplayMember = "class_name";
+                    //cmbFilterClass.ValueMember = "class_id";
+                    //cmbFilterClass.SelectedIndex = -1; // No selection by default
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Failed to load class filter: " + ex.Message);
+                }
+            }
+        }
+
+        private DataTable LoadFilteredReportData()
+        {
+            using (MySqlConnection conn = new MySqlConnection(connectionString))
+            {
+                string query = @"
+            SELECT 
+                s.student_id,
+                s.first_name,
+                s.last_name,
+                s.date_of_birth,
+                s.email,
+                s.phone,
+                s.class_id,
+                c.class_name,
+                g.grade,
+                s.graduation_date,
+                s.last_login
+            FROM students s
+            LEFT JOIN classes c ON s.class_id = c.class_id
+            LEFT JOIN grades g ON s.student_id = g.student_id
+            WHERE 1 = 1";
+
+                List<MySqlParameter> parameters = new List<MySqlParameter>();
+
+                // Name filter
+                if (!string.IsNullOrWhiteSpace(txtSearchName.Text))
+                {
+                    query += " AND (s.first_name LIKE @name OR s.last_name LIKE @name)";
+                    parameters.Add(new MySqlParameter("@name", "%" + txtSearchName.Text + "%"));
+                }
+
+                // Class filter
+                //if (cmbFilterClass.SelectedIndex != -1)
+                //{
+                 //   query += " AND s.class_id = @classId";
+                 //   parameters.Add(new MySqlParameter("@classId", cmbFilterClass.SelectedValue));
+                //}
+
+                // Optional: Date range filter (graduation_date)
+                //if (chkUseDateRange.Checked) // Use a checkbox if you want to toggle date filter
+                //{
+                //query += " AND s.graduation_date BETWEEN @from AND @to";
+                //parameters.Add(new MySqlParameter("@from", dtpFrom.Value.Date));
+                //parameters.Add(new MySqlParameter("@to", dtpTo.Value.Date));
+                //}
+
+                try
+                {
+                    conn.Open();
+                    MySqlCommand cmd = new MySqlCommand(query, conn);
+                    cmd.Parameters.AddRange(parameters.ToArray());
+                    MySqlDataAdapter adapter = new MySqlDataAdapter(cmd);
+                    DataTable dt = new DataTable();
+                    adapter.Fill(dt);
+                    return dt;
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Failed to load data: " + ex.Message);
+                    return null;
+                }
+            }
+        }
+
+        private void btnApplyFilter_Click(object sender, EventArgs e)
+        {
+            dataGridViewReport.DataSource = LoadFilteredReportData();
+        }
+
+        private void cmbFilterClass_SelectedIndexChanged(object sender, EventArgs e)
+        {
+
+        }
+
+        private DataTable LoadAllStudentReports()
+        {
+            string connectionString = "server=localhost;user=root;password=jeth123;database=school_information_system;";
+            string query = @"
+                SELECT s.student_id, CONCAT(s.first_name, ' ', s.last_name) AS student_name,
+                       s.email, s.phone, s.date_of_birth,
+                       c.class_name, g.grade
+                FROM students s
+                LEFT JOIN classes c ON s.class_id = c.class_id
+                LEFT JOIN grades g ON s.student_id = g.student_id
+                
+            ";
+
+            using (MySqlConnection conn = new MySqlConnection(connectionString))
+            {
+                MySqlDataAdapter adapter = new MySqlDataAdapter(query, conn);
+                DataTable dt = new DataTable();
+                adapter.Fill(dt);
+                return dt;
+            }
+        }
+
     }
 }
